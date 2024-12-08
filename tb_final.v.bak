@@ -1,0 +1,194 @@
+`include "memory.v";
+module tb();
+parameter W = 16;//width
+parameter D = 8;//depth
+parameter AD = 9;//address_width
+
+reg clk_i,rst_i,wr_rd_i,valid_i;
+reg [W-1:0] write_i;
+reg [AD-1:0] addr_i;
+wire ready_o;
+wire [W-1:0] read_o;
+integer i,ran;
+integer value;
+//instantiation
+memory #(.W(W),.D(D),.AD(AD)) dut (clk_i,rst_i,addr_i,write_i,wr_rd_i,valid_i,ready_o,read_o);
+//fd = front door access
+//bd = back door access
+initial
+begin
+	clk_i =0;
+	forever #5 clk_i = ~clk_i;
+end
+
+initial 
+begin
+	rst_i =1;
+	reset();
+	repeat(2)@(posedge clk_i);
+	rst_i =0;
+	$value$plusargs("value=%d",value);
+	case(value)
+	1://fd(1write,1read)
+	begin
+		fd_write(4,4);
+		fd_read(4,4);
+	end
+	2://fd(write,read)all location
+	begin
+		fd_write(0,D-1);
+		fd_read(0,D-1);
+	end
+	3://acess 1st quarter fd
+	begin
+		fd_write(0,D/4-1);
+		fd_read(0,D/4-1);
+	end
+	4://acess 2nd quarter fd
+	begin
+		fd_write(D/4,D/2-1);
+		fd_read(D/4,D/2-1);
+	end
+	5://acess 3rd quarter fd
+	begin
+		fd_write(D/2,(3*D/4)-1);
+		fd_read(D/2,(3*D/4)-1);
+	end
+	6://acess 4th quarter fd
+	begin
+		fd_write((3*D/4),D-1);
+		fd_read((3*D/4),D-1);
+	end
+	7: //fd write and bd read
+	begin
+		fd_write(0,D-1);
+		bd_read(0,D-1);
+	end
+	8: //bd write and fd read
+	begin
+		bd_write(0,D-1);
+		fd_read(0,D-1);
+	end
+	9://fd(random location write read)
+	begin
+		ran = $random;
+		fd_write(ran,ran);
+		fd_read(ran,ran);
+	end
+	10://consecutive write and read
+	begin
+		for(i=0;i<D;i=i+1) begin
+			consec_wr_rd(i);
+		end
+	end
+	11://concurrent write read
+	begin
+		for(i=0;i<D;i=i+1) begin
+			concu_wr_rd(i);
+		end
+	end
+	default: //bd write and bd read
+	begin
+		bd_write(0,D-1);
+		bd_read(0,D-1);
+	end
+	endcase
+
+	#50 $finish;
+end
+
+task reset();
+begin
+	@(posedge clk_i);
+	addr_i = 0;
+	valid_i = 0;
+	wr_rd_i = 0;
+	write_i = 0;
+end
+endtask
+
+task fd_write(input reg[AD:0] start,input reg[AD:0] fin);
+begin
+	for(i=start;i<=fin;i=i+1)
+	begin
+		@(posedge clk_i);
+		addr_i = i;
+		valid_i = 1;
+		wr_rd_i = 1;
+		write_i = $random;
+		wait(ready_o == 1);
+		reset();
+	end
+end
+endtask
+
+task fd_read(input reg[AD:0] start,input reg[AD:0] fin);
+begin
+	for(i=start;i<=fin;i=i+1)
+	begin
+		@(posedge clk_i);
+		addr_i = i;
+		valid_i = 1;
+		wr_rd_i = 0;
+		wait(ready_o == 1);
+		reset();
+	end
+end
+endtask
+
+task bd_write(input reg[AD:0] start,input reg[AD:0] fin);
+begin
+$readmemh("value.hex",dut.mem,start,fin);
+end
+endtask
+
+task bd_read(input reg [AD:0] start,input reg[AD:0] fin);
+begin
+$writememh("value1.hex",dut.mem,start,fin);
+end
+endtask
+task consec_wr_rd(input reg [AD:0] start);
+begin
+		//write
+		@(posedge clk_i);
+		addr_i = start;
+		valid_i = 1;
+		wr_rd_i = 1;
+		write_i = $random;
+		wait(ready_o == 1);
+		
+		//read
+		@(posedge clk_i);
+		addr_i = start;
+		valid_i = 1;
+		wr_rd_i = 0;
+		wait(ready_o == 0);
+end
+endtask
+
+task concu_wr_rd(input reg [AD:0] start);
+begin
+	fork
+		//write
+		begin
+			@(posedge clk_i);
+			addr_i = start;
+			valid_i = 1;
+			wr_rd_i = 1;
+			write_i = $random;
+			wait(ready_o == 1);
+		end
+		//read
+		begin
+			@(posedge clk_i);
+			#12;
+			addr_i = start;
+			valid_i = 1;
+			wr_rd_i = 0;
+			wait(ready_o == 0);
+		end
+	join
+end
+endtask
+
+endmodule
